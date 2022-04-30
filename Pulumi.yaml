@@ -1,0 +1,3 @@
+name: azure-spring-java
+runtime: java
+description: A minimal Azure Native Java Pulumi program
