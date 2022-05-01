@@ -1,32 +1,27 @@
 package myproject;
 
+import com.azure.core.exception.ResourceExistsException;
+import com.azure.core.util.ClientOptions;
 import com.azure.data.appconfiguration.ConfigurationClientBuilder;
+import com.azure.data.appconfiguration.models.FeatureFlagConfigurationSetting;
 import com.azure.identity.DefaultAzureCredentialBuilder;
-import com.azure.identity.EnvironmentCredentialBuilder;
+import com.azure.resourcemanager.appconfiguration.AppConfigurationManager;
 import com.pulumi.Context;
 import com.pulumi.Exports;
 import com.pulumi.Pulumi;
 import com.pulumi.asset.FileAsset;
+import com.pulumi.azurenative.appconfiguration.ConfigurationStore;
+import com.pulumi.azurenative.appconfiguration.KeyValue;
+import com.pulumi.azurenative.appconfiguration.KeyValueArgs;
 import com.pulumi.azurenative.storage.*;
 import com.pulumi.azurenative.storage.enums.Kind;
 import com.pulumi.azurenative.storage.enums.PublicAccess;
 import com.pulumi.azurenative.storage.enums.SkuName;
-import com.pulumi.azurenative.storage.inputs.ActiveDirectoryPropertiesArgs;
-import com.pulumi.azurenative.storage.inputs.AzureFilesIdentityBasedAuthenticationArgs;
 import com.pulumi.azurenative.storage.inputs.SkuArgs;
 import com.pulumi.core.Output;
 import com.pulumi.kubernetes.ProviderArgs;
-import com.pulumi.kubernetes.apps_v1.Deployment;
-import com.pulumi.kubernetes.apps_v1.DeploymentArgs;
-import com.pulumi.kubernetes.apps_v1.inputs.DeploymentSpecArgs;
-import com.pulumi.kubernetes.core_v1.Service;
-import com.pulumi.kubernetes.core_v1.ServiceArgs;
-import com.pulumi.kubernetes.core_v1.enums.ServiceSpecType;
 import com.pulumi.kubernetes.core_v1.inputs.*;
-import com.pulumi.kubernetes.meta_v1.inputs.LabelSelectorArgs;
-import com.pulumi.kubernetes.meta_v1.inputs.ObjectMetaArgs;
 import com.pulumi.resources.ComponentResourceOptions;
-import com.pulumi.resources.CustomResourceOptions;
 import com.pulumi.resources.StackReference;
 
 import com.pulumi.kubernetes.Provider;
@@ -45,14 +40,14 @@ public class PulumiStack {
     public static Exports stack(Context ctx) {
         //https://www.pulumi.com/docs/intro/concepts/config/
         final var config = ctx.config();
-        final var configConnectionString = config.require("configConnectionString");
         final var platformStack = config.require("platformStack");
 
         // https://www.pulumi.com/docs/intro/concepts/stack/#stackreferences
         final var ref = new StackReference(platformStack);
         final var kubeconfig = ref.requireOutput("kubeconfig").applyValue(String::valueOf);
         final var namespace = ref.requireOutput("namespace").applyValue(String::valueOf);
-        final var configEndpoint = ref.requireOutput("configStore").applyValue(String::valueOf);
+        final var configStoreName = ref.requireOutput("configStore").applyValue(String::valueOf);
+        final var configConnectionString = ref.requireOutput("configStoreConnectionString").applyValue(String::valueOf);
 
         // https://www.pulumi.com/docs/intro/concepts/resources/
         final var sa = new StorageAccount(
@@ -86,6 +81,16 @@ public class PulumiStack {
                         "/home/demo/Documents/jdconf-2022/devopsforjavashops-testfeatureflags-pulumi/target/demo-0.0.1-SNAPSHOT.jar"))
                     .build());
 
+        configConnectionString.applyValue(conString -> {
+            final var client = new ConfigurationClientBuilder()
+                .connectionString(conString)
+                    .buildClient();
+            try {
+                client.addConfigurationSetting(new FeatureFlagConfigurationSetting("Beta", false));
+            } catch (ResourceExistsException e) { }
+            return conString;
+        });
+
         final var app = new App(
             "deployment",
             AppArgs.builder()
@@ -112,7 +117,7 @@ public class PulumiStack {
                         .kubeconfig(kubeconfig)
                         .build()))
                 .build());
-        ctx.export("service", app.url);
+        ctx.export("service", Output.format("http://%s/welcome", app.url));
         return ctx.exports();
     }
 }
