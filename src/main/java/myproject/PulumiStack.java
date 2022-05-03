@@ -1,18 +1,11 @@
 package myproject;
 
 import com.azure.core.exception.ResourceExistsException;
-import com.azure.core.util.ClientOptions;
 import com.azure.data.appconfiguration.ConfigurationClientBuilder;
 import com.azure.data.appconfiguration.models.FeatureFlagConfigurationSetting;
-import com.azure.identity.DefaultAzureCredentialBuilder;
-import com.azure.resourcemanager.appconfiguration.AppConfigurationManager;
 import com.pulumi.Context;
-import com.pulumi.Exports;
 import com.pulumi.Pulumi;
 import com.pulumi.asset.FileAsset;
-import com.pulumi.azurenative.appconfiguration.ConfigurationStore;
-import com.pulumi.azurenative.appconfiguration.KeyValue;
-import com.pulumi.azurenative.appconfiguration.KeyValueArgs;
 import com.pulumi.azurenative.storage.*;
 import com.pulumi.azurenative.storage.enums.Kind;
 import com.pulumi.azurenative.storage.enums.PublicAccess;
@@ -25,19 +18,26 @@ import com.pulumi.resources.ComponentResourceOptions;
 import com.pulumi.resources.StackReference;
 
 import com.pulumi.kubernetes.Provider;
-import com.azure.data.appconfiguration.ConfigurationClient;
 import myproject.k8s.App;
 import myproject.k8s.AppArgs;
 
-import java.nio.file.Path;
-import java.util.List;
 import java.util.Map;
 
 public class PulumiStack {
     public static void main(String[] args) {
         Pulumi.run(PulumiStack::stack);
     }
-    public static Exports stack(Context ctx) {
+
+    /**
+     * This uploads a JAR to Azure
+     * Creates a deployment on a kubernetes cluster that donwloads and runs that JAR
+     * Outputs where the app is running
+     *
+     * Note to self: Run pulumi up becuase it could take some time
+     *
+     * @param ctx
+     */
+    public static void stack(Context ctx) {
         //https://www.pulumi.com/docs/intro/concepts/config/
         final var config = ctx.config();
         final var platformStack = config.require("platformStack");
@@ -46,7 +46,6 @@ public class PulumiStack {
         final var ref = new StackReference(platformStack);
         final var kubeconfig = ref.requireOutput("kubeconfig").applyValue(String::valueOf);
         final var namespace = ref.requireOutput("namespace").applyValue(String::valueOf);
-        final var configStoreName = ref.requireOutput("configStore").applyValue(String::valueOf);
         final var configConnectionString = ref.requireOutput("configStoreConnectionString").applyValue(String::valueOf);
 
         // https://www.pulumi.com/docs/intro/concepts/resources/
@@ -76,17 +75,21 @@ public class PulumiStack {
                     .accountName(sa.name())
                     .containerName(container.name())
                     .resourceGroupName("mspulumi")
-                    // TODO move this
                     .source(new FileAsset(
+                        // This kinda looks ugly, but you can tell it's a path at a glance
                         "/home/demo/Documents/jdconf-2022/devopsforjavashops-testfeatureflags-pulumi/target/demo-0.0.1-SNAPSHOT.jar"))
                     .build());
 
         configConnectionString.applyValue(conString -> {
+            // Azure SDK
             final var client = new ConfigurationClientBuilder()
                 .connectionString(conString)
                     .buildClient();
             try {
-                client.addConfigurationSetting(new FeatureFlagConfigurationSetting("Beta", false));
+                // Careful when creating resources yourself using SDKs
+                // because Pulumi isn't tracking this
+                client.addConfigurationSetting(
+                    new FeatureFlagConfigurationSetting("Beta", false));
             } catch (ResourceExistsException e) { }
             return conString;
         });
@@ -118,6 +121,5 @@ public class PulumiStack {
                         .build()))
                 .build());
         ctx.export("service", Output.format("http://%s/welcome", app.url));
-        return ctx.exports();
     }
 }
